@@ -74,7 +74,7 @@
 | フレームワーク | Next.js（最新安定版）App Router |
 | 言語 | TypeScript（`strict: true`） |
 | UI | Tailwind CSS（`create-next-app`の既定に従う） |
-| ORM | Prisma |
+| ORM | Prisma 7（7.9.x系）+ `@prisma/adapter-pg` |
 | DB | PostgreSQL 16 |
 | 認証 | Auth.js (NextAuth) v5 |
 | バリデーション | Zod |
@@ -95,7 +95,89 @@ v4系が生成された場合、**v3の書き方を混在させない**。
 
 本番コンテナ起動時に `prisma migrate deploy` を実行するため、`prisma` パッケージを **devDependencies ではなく dependencies** に入れる。
 
-`@prisma/client` も当然 dependencies。
+`@prisma/client` / `@prisma/adapter-pg` / `pg` も dependencies。
+
+### 2.3 Prisma 7 対応【2026-08-05 追記・確定】
+
+`docs/02_DB-Prisma/schema.prisma` は Prisma 6 形式で書かれており、Prisma 7 ではそのまま使えない。
+
+検証済みの事実:
+
+| 項目 | 検証結果 |
+|---|---|
+| `datasource` の `url = env("DATABASE_URL")` | **Prisma 7 では P1012 エラー。削除が必須** |
+| `generator provider = "prisma-client-js"` | **Prisma 7 でも正常動作。変更不要** |
+| モデル・enum・インデックス定義 | **完全互換。7テーブル / 7 enum / 34インデックスを設計どおり生成** |
+| `PrismaClient` の生成 | ドライバアダプタ必須。アダプタなしは実行時エラー |
+
+確定判断:
+
+**`schema.prisma` の変更許可は `datasource` ブロックの `url` 行の削除だけとする。**
+
+`model` / `enum` / `@@index` / `@@map` / 型・制約は**1バイトも変更しない**。この禁止の目的はDB設計v1.1で確定したデータモデルを保護することであり、接続設定のボイラープレートは対象外である。
+
+#### 2.3.1 schema.prisma の変更内容
+
+```prisma
+// 変更前（Prisma 6形式）
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 変更後（Prisma 7形式）
+datasource db {
+  provider = "postgresql"
+}
+```
+
+`generator client { provider = "prisma-client-js" }` は**そのまま維持する**。`prisma-client` への変更やoutput指定の追加をしない。
+
+#### 2.3.2 prisma.config.ts（リポジトリ直下・新規作成）
+
+```ts
+import { defineConfig, env } from "prisma/config";
+
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  migrations: {
+    path: "prisma/migrations",
+  },
+  datasource: {
+    url: env("DATABASE_URL"),
+  },
+});
+```
+
+Prisma CLI がこのファイルを追加ツールなしで読み込むことは検証済み。
+
+#### 2.3.3 PrismaClient のインスタンス化
+
+`src/lib/prisma.ts` はアダプタ経由で生成する。
+
+```ts
+import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+// globalThis へキャッシュするシングルトンにする
+```
+
+アダプタなしの `new PrismaClient()` は実行時に失敗する。
+
+#### 2.3.4 CLIフラグの変更
+
+Prisma 7 で `prisma migrate diff` のフラグが変わっている。使う場合は注意する。
+
+```text
+--to-schema-datamodel  →  --to-schema（旧フラグは削除済み）
+```
+
+#### 2.3.5 DATABASE_URL がビルド時にも必要
+
+`prisma.config.ts` が `env("DATABASE_URL")` を参照するため、**`prisma generate` も DATABASE_URL が未設定だと失敗する**。
+
+Dockerのビルド段階では実DBへ接続しないが、変数の存在は必要になる。§4.10 の対応に従うこと。
 
 ---
 
@@ -188,7 +270,9 @@ ses-project-manager/
 
 `docs/02_DB-Prisma/schema.prisma` を `prisma/schema.prisma` へコピーする。
 
-**内容を1文字も変更しない。** モデル追加・フィールド追加・Auth.js用モデル追加をしない。
+変更してよいのは **§2.3.1 の `datasource` ブロックの `url` 行削除だけ**。
+
+`model` / `enum` / フィールド / 型 / `@@index` / `@@map` / `@unique` は**1バイトも変更しない**。モデル追加・フィールド追加・Auth.js用モデル追加をしない。
 
 #### 4.2.2 初期マイグレーション
 
@@ -439,8 +523,22 @@ Drive-Dokploy詳細設計 §3.4 / §3.5 に従う。
 - `next.config.ts` で `output: "standalone"`
 - runner は非rootユーザー（例: `nextjs` / uid 1001）で実行
 - `ENV TZ=Asia/Tokyo`
-- Prisma の生成物とエンジンを runner へ確実にコピーする
+- Prisma の生成物を runner へ確実にコピーする
+- **`prisma.config.ts` と `prisma/` を runner へコピーする**（起動時の `migrate deploy` に必要）
 - 起動コマンドで **マイグレーション適用後にアプリを起動**し、マイグレーション失敗時はアプリを起動しない
+
+#### ビルド段階の DATABASE_URL（§2.3.5）
+
+`prisma generate` が `prisma.config.ts` 経由で `DATABASE_URL` を要求するため、**builder段階にダミー値を置く**。実DBへは接続しない。
+
+```dockerfile
+# builder段階のみ。実行時はDokployの環境変数が使われる
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
+```
+
+このダミー値を runner段階へ持ち込まない。runner に残すと、Dokployの変数設定漏れに気づけなくなる。
+
+Prisma 7 は Rust クエリエンジンのバイナリを同梱しないため、エンジンファイルの手動コピーは不要である。
 
 ```dockerfile
 CMD ["sh", "-c", "npx prisma migrate deploy && node server.js"]
@@ -477,7 +575,7 @@ Phase 1 の目的はテスト基盤が動く状態にすることであり、網
 
 以下に違反した実装はレビューで差し戻す。
 
-1. `prisma/schema.prisma` を変更する
+1. `prisma/schema.prisma` の `model` / `enum` / インデックス定義を変更する（§2.3.1 の `url` 行削除のみ許可）
 2. `prisma db push` を使う
 3. マイグレーションなしでDBを変更する
 4. Auth.js の Prisma Adapter を導入する（スキーマ変更が発生するため）
@@ -505,6 +603,7 @@ Phase 1 の目的はテスト基盤が動く状態にすることであり、網
 | 3 | `npm run build` | 成功 |
 | 4 | `npm run test` | 全件成功 |
 | 5 | `docker build .` | 成功 |
+| 5b | ビルドしたイメージを起動 | `migrate deploy` が通りアプリが起動する |
 | 6 | クリーンDBへ `prisma migrate deploy` | 7テーブル作成 |
 | 7 | 制約確認 | `database_constraints.sql` の全CHECK制約が存在 |
 | 8 | `npm run db:seed` | ADMINユーザー1件作成、emailが小文字 |
