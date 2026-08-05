@@ -71,7 +71,7 @@
 |---|---|
 | Node.js | 22 LTS |
 | パッケージマネージャ | npm |
-| フレームワーク | Next.js（最新安定版）App Router |
+| フレームワーク | Next.js 16（16.3.x系）App Router |
 | 言語 | TypeScript（`strict: true`） |
 | UI | Tailwind CSS（`create-next-app`の既定に従う） |
 | ORM | Prisma 7（7.9.x系）+ `@prisma/adapter-pg` |
@@ -90,6 +90,21 @@ v4系が生成された場合、**v3の書き方を混在させない**。
 - `globals.css` は `@import "tailwindcss";`
 - `@tailwind base;` / `@tailwind components;` / `@tailwind utilities;` を書かない
 - `tailwind.config.js` の `content` 配列を手で足さない
+
+### 2.1.1 Next.js 16 の変更点【2026-08-05 追記・確定】
+
+Next.js 16 で本指示書に影響する破壊的変更が2件ある。いずれも検証済み。
+
+| 変更 | 影響 |
+|---|---|
+| `next lint` が削除された | `"lint": "next lint"` は `lint` をディレクトリ引数と解釈して失敗する。**`"lint": "eslint ."` を使う** |
+| Middleware が **Proxy** へ改称された | ファイル規約が `middleware.ts` → **`proxy.ts`**。関数名も `proxy` |
+
+`middleware.ts` は後方互換で動作するが警告が出るため使わない。Next.js 16 の正式規約である `proxy.ts` を使うこと。
+
+バージョンは `create-next-app@latest` が生成する 16.3.x をそのまま使う。`package-lock.json` を必ずコミットし、ビルドを再現可能にすること。
+
+16.3.0 は2026-08-03リリースと新しいため、Phase 1 の作業中に明確な不具合を踏んだ場合は 16.2.12 への固定を提案してよい（自己判断で固定せず、報告すること）。
 
 ### 2.2 Prisma を dependencies に含める
 
@@ -207,7 +222,7 @@ ses-project-manager/
 │  │     ├─ auth/[...nextauth]/route.ts
 │  │     └─ health/route.ts
 │  ├─ auth.ts                     # Auth.js 設定
-│  ├─ middleware.ts
+│  ├─ proxy.ts                    # Next.js 16 の Proxy（旧 middleware.ts）
 │  ├─ lib/
 │  │  ├─ env.ts                   # 環境変数のZod検証
 │  │  ├─ prisma.ts                # PrismaClient シングルトン
@@ -254,7 +269,7 @@ ses-project-manager/
   "dev": "next dev",
   "build": "prisma generate && next build",
   "start": "next start",
-  "lint": "next lint",
+  "lint": "eslint .",
   "typecheck": "tsc --noEmit",
   "format": "prettier --write .",
   "test": "vitest run",
@@ -498,13 +513,20 @@ Phase 3 までのプレースホルダ。
 
 「この画面は Phase 3 で実装します」とだけ表示する。**ダミーデータを表示しない。**
 
-### 4.9 middleware
+### 4.9 Proxy（旧 middleware）
 
-`src/middleware.ts`
+`src/proxy.ts`（§2.1.1 のとおり Next.js 16 で改称された。`middleware.ts` を作らない）
 
+- 関数は名前付き `proxy` か default export
 - 未認証で保護ページ → `/login` へリダイレクト
 - 未認証で保護API → 401 JSON
-- `/login`、`/api/auth/*`、`/api/health`、静的アセットは除外
+- `/login`、`/api/auth/*`、`/api/health`、静的アセットは `config.matcher` で除外
+
+Auth.js の連携例が `export { auth as middleware }` になっている資料が多いが、Next.js 16 では以下とする。
+
+```ts
+export { auth as proxy } from "@/auth";
+```
 
 ### 4.10 Dockerfile
 
