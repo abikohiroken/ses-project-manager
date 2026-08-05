@@ -1,0 +1,456 @@
+openapi: 3.1.0
+info:
+  title: SES Project Manager API
+  version: 1.0.0
+servers:
+  - url: https://{host}/api
+    variables:
+      host:
+        default: example.com
+tags:
+  - name: Webhook
+  - name: ProjectIntakes
+  - name: Projects
+  - name: CsvImports
+  - name: Integration
+  - name: Users
+  - name: Internal
+  - name: Health
+paths:
+  /webhooks/line:
+    post:
+      tags: [Webhook]
+      summary: Receive LINE Messaging API webhook
+      parameters:
+        - in: header
+          name: x-line-signature
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        "200": {description: Accepted}
+        "401": {description: Invalid signature}
+        "503": {description: Google Sheets unavailable}
+  /project-intakes:
+    get:
+      tags: [ProjectIntakes]
+      security: [{sessionAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/Page"}
+        - {$ref: "#/components/parameters/PageSize"}
+        - in: query
+          name: reviewStatus
+          schema: {$ref: "#/components/schemas/IntakeReviewStatus"}
+        - in: query
+          name: q
+          schema: {type: string, maxLength: 255}
+        - in: query
+          name: hasWarning
+          schema: {type: boolean}
+      responses:
+        "200":
+          description: List
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectIntakeListResponse"
+  /project-intakes/{id}:
+    parameters:
+      - {$ref: "#/components/parameters/UuidPath"}
+    get:
+      tags: [ProjectIntakes]
+      security: [{sessionAuth: []}]
+      responses:
+        "200":
+          description: Detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectIntakeDetailResponse"
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [ProjectIntakes]
+      security: [{sessionAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectDraftUpdate"
+      responses:
+        "200": {description: Updated}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /project-intakes/{id}/create-project:
+    post:
+      tags: [ProjectIntakes]
+      security: [{sessionAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/UuidPath"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [updatedAt, projectStatus]
+              properties:
+                updatedAt: {type: string, format: date-time}
+                projectStatus:
+                  type: string
+                  const: OPEN
+      responses:
+        "201": {description: Project created}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /project-intakes/{id}/merge:
+    post:
+      tags: [ProjectIntakes]
+      security: [{sessionAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/UuidPath"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [updatedAt, targetProjectId, applyFields]
+              properties:
+                updatedAt: {type: string, format: date-time}
+                targetProjectId: {type: string, format: uuid}
+                applyFields:
+                  type: array
+                  uniqueItems: true
+                  items: {type: string}
+      responses:
+        "200": {description: Merged}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /project-intakes/{id}/reject:
+    post:
+      tags: [ProjectIntakes]
+      security: [{sessionAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/UuidPath"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [updatedAt]
+              properties:
+                updatedAt: {type: string, format: date-time}
+      responses:
+        "200": {description: Rejected}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /projects:
+    get:
+      tags: [Projects]
+      security: [{sessionAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/Page"}
+        - {$ref: "#/components/parameters/PageSize"}
+        - in: query
+          name: q
+          schema: {type: string}
+        - in: query
+          name: projectStatus
+          schema: {$ref: "#/components/schemas/ProjectStatus"}
+      responses:
+        "200": {description: Project list}
+  /projects/{id}:
+    parameters:
+      - {$ref: "#/components/parameters/UuidPath"}
+    get:
+      tags: [Projects]
+      security: [{sessionAuth: []}]
+      responses:
+        "200": {description: Project detail}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [Projects]
+      security: [{sessionAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectDraftUpdate"
+      responses:
+        "200": {description: Updated}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /projects/{id}/open:
+    post:
+      tags: [Projects]
+      security: [{sessionAuth: []}]
+      parameters: [{$ref: "#/components/parameters/UuidPath"}]
+      requestBody: {$ref: "#/components/requestBodies/UpdatedAtBody"}
+      responses:
+        "200": {description: Opened}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /projects/{id}/hold:
+    post:
+      tags: [Projects]
+      security: [{sessionAuth: []}]
+      parameters: [{$ref: "#/components/parameters/UuidPath"}]
+      requestBody: {$ref: "#/components/requestBodies/UpdatedAtBody"}
+      responses:
+        "200": {description: Put on hold}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /projects/{id}/close:
+    post:
+      tags: [Projects]
+      security: [{sessionAuth: []}]
+      parameters: [{$ref: "#/components/parameters/UuidPath"}]
+      requestBody: {$ref: "#/components/requestBodies/UpdatedAtBody"}
+      responses:
+        "200": {description: Closed}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /projects/{id}/archive:
+    post:
+      tags: [Projects]
+      security: [{sessionAuth: []}]
+      parameters: [{$ref: "#/components/parameters/UuidPath"}]
+      requestBody: {$ref: "#/components/requestBodies/UpdatedAtBody"}
+      responses:
+        "200": {description: Archived}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /csv-imports:
+    get:
+      tags: [CsvImports]
+      security: [{sessionAuth: []}]
+      parameters:
+        - {$ref: "#/components/parameters/Page"}
+        - {$ref: "#/components/parameters/PageSize"}
+        - in: query
+          name: status
+          schema: {$ref: "#/components/schemas/CsvImportStatus"}
+      responses:
+        "200": {description: Import list}
+  /csv-imports/{id}:
+    get:
+      tags: [CsvImports]
+      security: [{sessionAuth: []}]
+      parameters: [{$ref: "#/components/parameters/UuidPath"}]
+      responses:
+        "200": {description: Import detail}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /integration-status:
+    get:
+      tags: [Integration]
+      security: [{sessionAuth: []}]
+      responses:
+        "200": {description: Integration status}
+  /users:
+    get:
+      tags: [Users]
+      security: [{sessionAuth: []}]
+      responses:
+        "200": {description: User list}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [Users]
+      security: [{sessionAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserCreate"
+      responses:
+        "201": {description: User created}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /users/{id}:
+    patch:
+      tags: [Users]
+      security: [{sessionAuth: []}]
+      parameters: [{$ref: "#/components/parameters/UuidPath"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpdate"
+      responses:
+        "200": {description: User updated}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /internal/google-drive-import:
+    post:
+      tags: [Internal]
+      security: [{cronAuth: []}]
+      responses:
+        "200": {description: Import run completed}
+        "401": {description: Invalid secret}
+        "503": {description: Dependency unavailable}
+  /internal/drive-move-retry:
+    post:
+      tags: [Internal]
+      security: [{cronAuth: []}]
+      responses:
+        "200": {description: Retry completed}
+  /internal/import-reconcile:
+    post:
+      tags: [Internal]
+      security: [{cronAuth: []}]
+      responses:
+        "200": {description: Reconciliation completed}
+  /health:
+    get:
+      tags: [Health]
+      responses:
+        "200": {description: Healthy}
+        "503": {description: Unavailable}
+components:
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: authjs.session-token
+    cronAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    UuidPath:
+      in: path
+      name: id
+      required: true
+      schema: {type: string, format: uuid}
+    Page:
+      in: query
+      name: page
+      schema: {type: integer, minimum: 1, default: 1}
+    PageSize:
+      in: query
+      name: pageSize
+      schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+  requestBodies:
+    UpdatedAtBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [updatedAt]
+            properties:
+              updatedAt: {type: string, format: date-time}
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/ErrorResponse"}
+  schemas:
+    IntakeReviewStatus:
+      type: string
+      enum: [PENDING, REVIEWED, MERGED, REJECTED]
+    ProjectStatus:
+      type: string
+      enum: [OPEN, ON_HOLD, CLOSED, ARCHIVED]
+    CsvImportStatus:
+      type: string
+      enum: [PENDING, PROCESSING, SUCCESS, PARTIAL_SUCCESS, ERROR, SKIPPED]
+    ProjectDraftUpdate:
+      type: object
+      required: [updatedAt]
+      properties:
+        updatedAt: {type: string, format: date-time}
+        projectName: {type: [string, "null"], maxLength: 255}
+        projectSummary: {type: [string, "null"]}
+        requiredSkills:
+          type: array
+          items: {type: string}
+        preferredSkills:
+          type: array
+          items: {type: string}
+        role: {type: [string, "null"], maxLength: 100}
+        process: {type: [string, "null"], maxLength: 255}
+        unitPriceMinMan: {type: [integer, "null"], minimum: 0}
+        unitPriceMaxMan: {type: [integer, "null"], minimum: 0}
+        settlementRange: {type: [string, "null"], maxLength: 100}
+        startMonth:
+          type: [string, "null"]
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        endMonth:
+          type: [string, "null"]
+          pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+        workDaysPerWeek: {type: [integer, "null"], minimum: 1, maximum: 7}
+        location: {type: [string, "null"], maxLength: 255}
+        nearestStation: {type: [string, "null"], maxLength: 255}
+        remoteStyle:
+          type: [string, "null"]
+          enum: [full, hybrid, onsite, unknown, null]
+        remoteNote: {type: [string, "null"]}
+        recruitmentCount: {type: [integer, "null"], minimum: 1}
+        commercialFlow: {type: [string, "null"]}
+        interviewCount: {type: [integer, "null"], minimum: 0}
+        foreignerAllowed:
+          type: [string, "null"]
+          enum: [allowed, not_allowed, conditional, unknown, null]
+        ageLimit: {type: [string, "null"], maxLength: 100}
+        nationalityNote: {type: [string, "null"]}
+        employmentCondition: {type: [string, "null"]}
+    ProjectIntakeListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string, format: uuid}
+              receptionId: {type: string}
+              projectName: {type: [string, "null"]}
+              reviewStatus: {$ref: "#/components/schemas/IntakeReviewStatus"}
+        pagination: {$ref: "#/components/schemas/Pagination"}
+    ProjectIntakeDetailResponse:
+      type: object
+      properties:
+        data: {type: object}
+    Pagination:
+      type: object
+      required: [page, pageSize, total, totalPages]
+      properties:
+        page: {type: integer}
+        pageSize: {type: integer}
+        total: {type: integer}
+        totalPages: {type: integer}
+    UserCreate:
+      type: object
+      required: [email, name, role]
+      properties:
+        email: {type: string, format: email, maxLength: 254}
+        name: {type: string, minLength: 1, maxLength: 100}
+        role: {type: string, enum: [ADMIN, OPERATOR, VIEWER]}
+    UserUpdate:
+      type: object
+      required: [updatedAt]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 100}
+        role: {type: string, enum: [ADMIN, OPERATOR, VIEWER]}
+        isActive: {type: boolean}
+        updatedAt: {type: string, format: date-time}
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            details: {type: array, items: {type: object}}
+            requestId: {type: string}

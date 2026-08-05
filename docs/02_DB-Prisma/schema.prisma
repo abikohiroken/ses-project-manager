@@ -1,0 +1,270 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  VIEWER
+}
+
+enum IntakeReviewStatus {
+  PENDING
+  REVIEWED
+  MERGED
+  REJECTED
+}
+
+enum ProjectStatus {
+  OPEN
+  ON_HOLD
+  CLOSED
+  ARCHIVED
+}
+
+enum ExportBatchStatus {
+  RESERVED
+  CREATED
+  ERROR
+}
+
+enum CsvImportStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  PARTIAL_SUCCESS
+  ERROR
+  SKIPPED
+}
+
+enum DriveMoveStatus {
+  PENDING
+  MOVED
+  MOVE_PENDING
+  ERROR
+}
+
+enum CsvImportRowStatus {
+  SUCCESS
+  ERROR
+  SKIPPED
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique @db.VarChar(254)
+  name         String   @db.VarChar(100)
+  role         UserRole @default(OPERATOR)
+  isActive     Boolean  @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(3)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  reviewedIntakes ProjectIntake[] @relation("IntakeReviewedBy")
+  createdProjects Project[]       @relation("ProjectCreatedBy")
+  updatedProjects Project[]       @relation("ProjectUpdatedBy")
+
+  @@index([role, isActive], map: "users_role_active_idx")
+  @@map("users")
+}
+
+model ProjectIntake {
+  id                    String             @id @default(uuid()) @db.Uuid
+  receptionId           String             @unique @map("reception_id") @db.VarChar(64)
+  lineMessageId         String             @unique @map("line_message_id") @db.VarChar(128)
+  aiSnapshot            Json               @map("ai_snapshot")
+  projectName           String?            @map("project_name") @db.VarChar(255)
+  projectSummary        String?            @map("project_summary") @db.Text
+  requiredSkills        Json               @default("[]") @map("required_skills")
+  preferredSkills       Json               @default("[]") @map("preferred_skills")
+  role                  String?            @db.VarChar(100)
+  process               String?            @db.VarChar(255)
+  unitPriceMinMan       Int?               @map("unit_price_min_man")
+  unitPriceMaxMan       Int?               @map("unit_price_max_man")
+  settlementRange       String?            @map("settlement_range") @db.VarChar(100)
+  startMonth            DateTime?          @map("start_month") @db.Date
+  endMonth              DateTime?          @map("end_month") @db.Date
+  workDaysPerWeek       Int?               @map("work_days_per_week")
+  location              String?            @db.VarChar(255)
+  nearestStation        String?            @map("nearest_station") @db.VarChar(255)
+  remoteStyle           String?            @map("remote_style") @db.VarChar(32)
+  remoteNote            String?            @map("remote_note") @db.Text
+  recruitmentCount      Int?               @map("recruitment_count")
+  commercialFlow        String?            @map("commercial_flow") @db.Text
+  interviewCount        Int?               @map("interview_count")
+  foreignerAllowed      String?            @map("foreigner_allowed") @db.VarChar(32)
+  ageLimit              String?            @map("age_limit") @db.VarChar(100)
+  nationalityNote       String?            @map("nationality_note") @db.Text
+  employmentCondition   String?            @map("employment_condition") @db.Text
+  warningCodes          Json               @default("[]") @map("warning_codes")
+  reviewStatus          IntakeReviewStatus @default(PENDING) @map("review_status")
+  linkedProjectId       String?            @map("linked_project_id") @db.Uuid
+  promptVersion         String             @map("prompt_version") @db.VarChar(64)
+  receivedAt            DateTime           @map("received_at") @db.Timestamptz(3)
+  reviewedAt            DateTime?          @map("reviewed_at") @db.Timestamptz(3)
+  reviewedById          String?            @map("reviewed_by_id") @db.Uuid
+  createdAt             DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  linkedProject Project?       @relation("IntakeLinkedProject", fields: [linkedProjectId], references: [id], onDelete: Restrict)
+  reviewedBy    User?          @relation("IntakeReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  source        ProjectSource?
+  importRow     CsvImportRow?
+
+  @@index([reviewStatus, receivedAt(sort: Desc)], map: "project_intakes_status_received_idx")
+  @@index([projectName], map: "project_intakes_project_name_idx")
+  @@index([startMonth], map: "project_intakes_start_month_idx")
+  @@index([linkedProjectId], map: "project_intakes_linked_project_idx")
+  @@map("project_intakes")
+}
+
+model Project {
+  id                    String        @id @default(uuid()) @db.Uuid
+  projectCode           String        @unique @map("project_code") @db.VarChar(32)
+  projectName           String        @map("project_name") @db.VarChar(255)
+  projectSummary        String?       @map("project_summary") @db.Text
+  requiredSkills        Json          @default("[]") @map("required_skills")
+  preferredSkills       Json          @default("[]") @map("preferred_skills")
+  role                  String?       @db.VarChar(100)
+  process               String?       @db.VarChar(255)
+  projectStatus         ProjectStatus @default(OPEN) @map("project_status")
+  unitPriceMinMan       Int?          @map("unit_price_min_man")
+  unitPriceMaxMan       Int?          @map("unit_price_max_man")
+  settlementRange       String?       @map("settlement_range") @db.VarChar(100)
+  startMonth            DateTime?     @map("start_month") @db.Date
+  endMonth              DateTime?     @map("end_month") @db.Date
+  workDaysPerWeek       Int?          @map("work_days_per_week")
+  location              String?       @db.VarChar(255)
+  nearestStation        String?       @map("nearest_station") @db.VarChar(255)
+  remoteStyle           String?       @map("remote_style") @db.VarChar(32)
+  remoteNote            String?       @map("remote_note") @db.Text
+  recruitmentCount      Int?          @map("recruitment_count")
+  commercialFlow        String?       @map("commercial_flow") @db.Text
+  interviewCount        Int?          @map("interview_count")
+  foreignerAllowed      String?       @map("foreigner_allowed") @db.VarChar(32)
+  ageLimit              String?       @map("age_limit") @db.VarChar(100)
+  nationalityNote       String?       @map("nationality_note") @db.Text
+  employmentCondition   String?       @map("employment_condition") @db.Text
+  createdById           String        @map("created_by_id") @db.Uuid
+  updatedById           String?       @map("updated_by_id") @db.Uuid
+  archivedAt            DateTime?     @map("archived_at") @db.Timestamptz(3)
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdBy     User            @relation("ProjectCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy     User?           @relation("ProjectUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  linkedIntakes ProjectIntake[] @relation("IntakeLinkedProject")
+  sources       ProjectSource[]
+
+  @@index([projectStatus, updatedAt(sort: Desc)], map: "projects_status_updated_idx")
+  @@index([projectName], map: "projects_project_name_idx")
+  @@index([startMonth], map: "projects_start_month_idx")
+  @@index([location], map: "projects_location_idx")
+  @@map("projects")
+}
+
+model ProjectSource {
+  id                String   @id @default(uuid()) @db.Uuid
+  projectIntakeId   String   @unique @map("project_intake_id") @db.Uuid
+  projectId         String?  @map("project_id") @db.Uuid
+  receptionId       String   @unique @map("reception_id") @db.VarChar(64)
+  lineMessageId     String   @unique @map("line_message_id") @db.VarChar(128)
+  lineUserId        String?  @map("line_user_id") @db.VarChar(128)
+  lineGroupId       String?  @map("line_group_id") @db.VarChar(128)
+  sourceCompany     String?  @map("source_company") @db.VarChar(255)
+  sourceContact     String?  @map("source_contact") @db.VarChar(100)
+  rawText           String   @map("raw_text") @db.Text
+  receivedAt        DateTime @map("received_at") @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  projectIntake ProjectIntake @relation(fields: [projectIntakeId], references: [id], onDelete: Restrict)
+  project       Project?      @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@index([projectId], map: "project_sources_project_idx")
+  @@index([sourceCompany], map: "project_sources_company_idx")
+  @@index([receivedAt(sort: Desc)], map: "project_sources_received_idx")
+  @@map("project_sources")
+}
+
+model ExportBatch {
+  id             String            @id @default(uuid()) @db.Uuid
+  batchId        String            @unique @map("batch_id") @db.VarChar(64)
+  schemaVersion  String            @map("schema_version") @db.VarChar(32)
+  promptVersion  String            @map("prompt_version") @db.VarChar(64)
+  fileName       String            @unique @map("file_name") @db.VarChar(255)
+  driveFileId    String?           @unique @map("drive_file_id") @db.VarChar(255)
+  targetCount    Int               @map("target_count")
+  status         ExportBatchStatus @default(RESERVED)
+  generatedAt    DateTime?         @map("generated_at") @db.Timestamptz(3)
+  errorMessage   String?           @map("error_message") @db.Text
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  csvImport CsvImport?
+
+  @@index([status, createdAt], map: "export_batches_status_created_idx")
+  @@map("export_batches")
+}
+
+model CsvImport {
+  id                  String            @id @default(uuid()) @db.Uuid
+  exportBatchId       String?           @unique @map("export_batch_id") @db.Uuid
+  driveFileId         String            @unique @map("drive_file_id") @db.VarChar(255)
+  fileHash            String?           @map("file_hash") @db.Char(64)
+  fileName            String            @map("file_name") @db.VarChar(255)
+  schemaVersion       String?           @map("schema_version") @db.VarChar(32)
+  batchId             String?           @map("batch_id") @db.VarChar(64)
+  duplicateOfImportId String?           @map("duplicate_of_import_id") @db.Uuid
+  status              CsvImportStatus   @default(PENDING)
+  driveMoveStatus     DriveMoveStatus   @default(PENDING) @map("drive_move_status")
+  totalRows           Int               @default(0) @map("total_rows")
+  successRows         Int               @default(0) @map("success_rows")
+  failedRows          Int               @default(0) @map("failed_rows")
+  skippedRows         Int               @default(0) @map("skipped_rows")
+  attemptCount        Int               @default(0) @map("attempt_count")
+  processingStartedAt DateTime?         @map("processing_started_at") @db.Timestamptz(3)
+  importedAt          DateTime?         @map("imported_at") @db.Timestamptz(3)
+  errorCode           String?           @map("error_code") @db.VarChar(64)
+  errorMessage        String?           @map("error_message") @db.Text
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  exportBatch       ExportBatch? @relation(fields: [exportBatchId], references: [id], onDelete: SetNull)
+  duplicateOfImport CsvImport?   @relation("CsvImportDuplicate", fields: [duplicateOfImportId], references: [id], onDelete: SetNull)
+  duplicateImports  CsvImport[]  @relation("CsvImportDuplicate")
+  rows              CsvImportRow[]
+
+  @@index([fileHash], map: "csv_imports_file_hash_idx")
+  @@index([duplicateOfImportId], map: "csv_imports_duplicate_of_idx")
+  @@index([status, processingStartedAt], map: "csv_imports_status_started_idx")
+  @@index([driveMoveStatus, updatedAt], map: "csv_imports_move_status_idx")
+  @@index([batchId], map: "csv_imports_batch_idx")
+  @@map("csv_imports")
+}
+
+model CsvImportRow {
+  id                String             @id @default(uuid()) @db.Uuid
+  csvImportId       String             @map("csv_import_id") @db.Uuid
+  rowNumber         Int                @map("row_number")
+  receptionId       String?            @map("reception_id") @db.VarChar(64)
+  lineMessageId     String?            @map("line_message_id") @db.VarChar(128)
+  status            CsvImportRowStatus
+  errorCode         String?            @map("error_code") @db.VarChar(64)
+  errorMessage      String?            @map("error_message") @db.Text
+  projectIntakeId   String?            @unique @map("project_intake_id") @db.Uuid
+  rawData           Json               @map("raw_data")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  csvImport     CsvImport      @relation(fields: [csvImportId], references: [id], onDelete: Cascade)
+  projectIntake ProjectIntake? @relation(fields: [projectIntakeId], references: [id], onDelete: SetNull)
+
+  @@unique([csvImportId, rowNumber], map: "csv_import_rows_import_row_uq")
+  @@index([csvImportId, status], map: "csv_import_rows_import_status_idx")
+  @@index([receptionId], map: "csv_import_rows_reception_idx")
+  @@map("csv_import_rows")
+}
