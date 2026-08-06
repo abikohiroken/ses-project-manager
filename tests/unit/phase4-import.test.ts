@@ -436,8 +436,9 @@ describe("G. 内部API・上限", () => {
     database.csvImport.findUnique.mockResolvedValue(
       importRecord({ status: "SUCCESS", driveMoveStatus: "MOVED" }),
     );
-    await runGoogleDriveImport(client, () => NOW);
+    const result = await runGoogleDriveImport(client, () => NOW);
     expect(database.csvImport.findUnique).toHaveBeenCalledTimes(10);
+    expect(result.checkedAt).toBe("2026-08-06T12:00:00.000+09:00");
   });
 });
 

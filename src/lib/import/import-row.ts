@@ -219,7 +219,15 @@ export async function processImportRow(
     });
     return "SUCCESS";
   } catch (error) {
-    if (!isP2002(error)) throw error;
+    if (!isP2002(error)) {
+      return saveNonSuccessRow(
+        csvImportId,
+        rowNumber,
+        raw,
+        "ERROR",
+        "VALIDATION_ERROR",
+      );
+    }
     const target = p2002Target(error);
     if (/reception_?id/i.test(target)) {
       return saveNonSuccessRow(
