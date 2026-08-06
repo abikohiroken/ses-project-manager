@@ -1,4 +1,6 @@
 import { toJstIso } from "@/lib/api/datetime";
+import type { DriveClient } from "@/lib/google/drive-client";
+import { googleDriveClient } from "@/lib/google/drive-client";
 
 export type DriveStatus = {
   connected: boolean;
@@ -7,12 +9,23 @@ export type DriveStatus = {
   errorCode?: "GOOGLE_DRIVE_UNAVAILABLE";
 };
 
-// Phase 2 intentionally reports an unconnected stub. Phase 4 replaces only this implementation.
-export async function getDriveStatus(now = new Date()): Promise<DriveStatus> {
-  return {
-    connected: false,
-    inboxFiles: null,
-    checkedAt: toJstIso(now) ?? "",
-    errorCode: "GOOGLE_DRIVE_UNAVAILABLE",
-  };
+export async function getDriveStatus(
+  now = new Date(),
+  client: DriveClient = googleDriveClient,
+): Promise<DriveStatus> {
+  try {
+    const files = await client.listFiles();
+    return {
+      connected: true,
+      inboxFiles: files.length,
+      checkedAt: toJstIso(now) ?? "",
+    };
+  } catch {
+    return {
+      connected: false,
+      inboxFiles: null,
+      checkedAt: toJstIso(now) ?? "",
+      errorCode: "GOOGLE_DRIVE_UNAVAILABLE",
+    };
+  }
 }
