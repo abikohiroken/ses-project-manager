@@ -110,19 +110,78 @@ field  ← issue.path.join(".")   （path が空配列なら field を省略）
 reason ← issue.message
 ```
 
-### 2.3 日付の扱い（重要）
+### 2.3 日付・時刻のタイムゾーン方針【重要】
 
-`start_month` / `end_month` は Prisma の `@db.Date` である。**ローカルタイムで Date を構築しない。**
+**本システムの日付・時刻はすべて日本時間（JST, UTC+9）を基準とする。**
+
+ただし列の型によって扱いが3種類に分かれる。混同すると1日ずれ・9時間ずれが発生する。
+
+| 対象 | 型 | 扱い |
+|---|---|---|
+| `start_month` / `end_month` | `@db.Date` | **カレンダー値**。時刻もタイムゾーンも持たない |
+| `received_at` / `created_at` / `updated_at` 等 | `@db.Timestamptz` | **絶対時刻**。表示はJST |
+| `project_code` の日付部分 | 文字列 | **JSTの当日**（設計差分v1.2 §3.2） |
+
+#### 2.3.1 @db.Date は UTC で構築する
+
+これは「表示をUTCにする」という意味ではない。**JSTで入力された年月をずれなく保存するための技法**である。
+
+実測結果（PostgreSQL 16 / Prisma 7.9.1 / `date` 列）:
+
+```text
+new Date(2026, 8, 1)            → 保存値 2026-08-31  ← 1日ずれる（誤り）
+new Date(Date.UTC(2026, 8, 1))  → 保存値 2026-09-01  ← 正しい
+```
+
+ローカルタイムで構築すると、JSTの2026-09-01 00:00 は UTC では 2026-08-31 15:00 になり、`date` 列へは UTC 側の日付が保存されるため8月になってしまう。
 
 ```ts
-// NG: JSTの深夜0時 = UTCでは前日15:00 → 日付が1日ずれる
+// NG
 new Date(2026, 8, 1);
 
-// OK: UTCで構築する
+// OK
 new Date(Date.UTC(2026, 8, 1));
 ```
 
-`YYYY-MM` → DB は `YYYY-MM-01`。DB → `YYYY-MM` へ戻すときも `getUTCFullYear()` / `getUTCMonth()` を使う。ローカルgetterを使わない。
+DB → `YYYY-MM` へ戻すときも `getUTCFullYear()` / `getUTCMonth()` を使う。ローカルgetterを使わない。
+
+**ローカルタイムに依存する実装をしないこと。** 実行環境の `TZ` によって結果が変わり、テスト環境と本番で挙動が食い違う。
+
+#### 2.3.2 timestamptz の範囲検索は JST として解釈する
+
+`receivedFrom` / `receivedTo` / `importedFrom` / `importedTo` は `timestamptz` 列を絞り込む。
+
+**日付だけ（`YYYY-MM-DD`）を受け取った場合、その日のJSTでの1日全体として解釈する。** UTCとして扱うと9時間ずれ、その日の朝9時までのレコードが検索結果から漏れる。
+
+```text
+receivedFrom=2026-08-06 → >= 2026-08-05T15:00:00.000Z （JST 2026-08-06 00:00:00.000）
+receivedTo=2026-08-06   → <= 2026-08-06T14:59:59.999Z （JST 2026-08-06 23:59:59.999）
+```
+
+実装:
+
+```ts
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+function jstDayStartUtc(ymd: string): Date {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d) - JST_OFFSET_MS);
+}
+
+function jstDayEndUtc(ymd: string): Date {
+  return new Date(jstDayStartUtc(ymd).getTime() + 24 * 60 * 60 * 1000 - 1);
+}
+```
+
+JST は夏時間を持たないため、オフセットは常に +9 時間で固定してよい。
+
+オフセット付きの ISO 8601 日時（`2026-08-06T14:20:30+09:00` など）を受け取った場合は、**そのまま絶対時刻として扱う**。日付だけの場合との判別は入力形式で行う。どちらの形式も受け付けること。
+
+#### 2.3.3 出力
+
+`timestamptz` の出力は ISO 8601 + `+09:00` オフセット。Phase 1 の `response.ts` が `meta.timestamp` で採用している形式に揃える。
+
+UTC表記（末尾 `Z`）でレスポンスを返さない。
 
 ---
 
@@ -483,45 +542,53 @@ Vitest でユニットテストを書く。`@/lib/prisma` は `vi.mock` して�
 4. `pagination.ts`: 既定値 / 範囲外 / 非数値 / totalPages の計算（total=0 を含む）
 5. `validation.ts`: `path` が空配列のとき `field` を省略する
 
-### B. 日付変換（§2.3）
+### B. 日付・タイムゾーン（§2.3）
 
-6. `"2026-09"` → DB値が UTC の `2026-09-01` になる（ローカルタイムでずれない）
+6. `"2026-09"` → DB値が `2026-09-01` になる（ローカルタイム構築による1日ずれが起きない）
 7. DB値 `2026-09-01` → `"2026-09"` へ戻る
 8. `startMonth > endMonth` が `VALIDATION_ERROR` になる
+9. `receivedFrom=2026-08-06` → 比較値が `2026-08-05T15:00:00.000Z`（JST当日0時）
+10. `receivedTo=2026-08-06` → 比較値が `2026-08-06T14:59:59.999Z`（JST当日23:59:59.999）
+11. オフセット付き ISO 8601（`2026-08-06T14:20:30+09:00`）はそのまま絶対時刻として扱われる
+12. `importedFrom` / `importedTo` も同じJST解釈になる
+13. **`process.env.TZ` を `UTC` に差し替えても 6〜12 の結果が変わらない**
+
+項目13は「ローカルタイムに依存していない」ことの証明である。実行環境のTZに結果が左右される実装は不可。テスト内で `TZ` を変更して検証すること。
 
 ### C. 楽観ロックと状態遷移
 
-9. intake: `updateMany` の count=0 かつ対象なし → `NOT_FOUND`
-10. intake: count=0 かつ `reviewStatus != PENDING` → `INTAKE_ALREADY_PROCESSED`
-11. intake: count=0 かつ状態は PENDING → `OPTIMISTIC_LOCK_CONFLICT`
-12. projects: ARCHIVED への PATCH → `INVALID_STATE_TRANSITION`
-13. projects: 状態遷移の許可・不許可の全組み合わせ（open/hold/close/archive）
+14. intake: `updateMany` の count=0 かつ対象なし → `NOT_FOUND`
+15. intake: count=0 かつ `reviewStatus != PENDING` → `INTAKE_ALREADY_PROCESSED`
+16. intake: count=0 かつ状態は PENDING → `OPTIMISTIC_LOCK_CONFLICT`
+17. projects: ARCHIVED への PATCH → `INVALID_STATE_TRANSITION`
+18. projects: 状態遷移の許可・不許可の全組み合わせ（open/hold/close/archive）
 
 ### D. project_code 採番（設計差分v1.2 §3）
 
-14. 当日レコードなし → `PRJ-<JST日付>-0001`
-15. 既存の最大が `0007` → `0008`
-16. 9999 到達 → `PROJECT_CODE_EXHAUSTED`
-17. P2002 発生時に再採番リトライし、3回失敗で `INTERNAL_ERROR`
+19. 当日レコードなし → `PRJ-<JST日付>-0001`
+20. 既存の最大が `0007` → `0008`
+21. **JSTの日付で採番される**（UTCでは前日でもJSTで当日ならその日付になる）
+22. 9999 到達 → `PROJECT_CODE_EXHAUSTED`
+23. P2002 発生時に再採番リトライし、3回失敗で `INTERNAL_ERROR`
 
 ### E. merge（設計差分v1.2 §5）
 
-18. `targetProjectUpdatedAt` 不一致 → `OPTIMISTIC_LOCK_CONFLICT` かつ `details[].field === "targetProjectUpdatedAt"`
-19. 統合先が ARCHIVED → `INVALID_STATE_TRANSITION`
-20. `applyFields` が空配列でも `project_sources.project_id` 更新と MERGED 化が実行される
-21. `applyFields` に許可外の項目 → `VALIDATION_ERROR`
+24. `targetProjectUpdatedAt` 不一致 → `OPTIMISTIC_LOCK_CONFLICT` かつ `details[].field === "targetProjectUpdatedAt"`
+25. 統合先が ARCHIVED → `INVALID_STATE_TRANSITION`
+26. `applyFields` が空配列でも `project_sources.project_id` 更新と MERGED 化が実行される
+27. `applyFields` に許可外の項目 → `VALIDATION_ERROR`
 
 ### F. 権限
 
-22. 参照系APIが VIEWER で成功する
-23. 更新系APIが VIEWER で 403 になる
-24. users API が OPERATOR で 403 になる
-25. 最後の有効ADMINの降格・無効化が `INVALID_STATE_TRANSITION` になる
+28. 参照系APIが VIEWER で成功する
+29. 更新系APIが VIEWER で 403 になる
+30. users API が OPERATOR で 403 になる
+31. 最後の有効ADMINの降格・無効化が `INVALID_STATE_TRANSITION` になる
 
 ### G. 連携状態
 
-26. Drive がスタブで `connected: false` でも API は 200 を返す
-27. `imports` 部分がDBの集計値を返す（スタブでない）
+32. Drive がスタブで `connected: false` でも API は 200 を返す
+33. `imports` 部分がDBの集計値を返す（スタブでない）
 
 ---
 
@@ -537,12 +604,14 @@ Vitest でユニットテストを書く。`@/lib/prisma` は `vi.mock` して�
 8. ソート・フィルタのキーを許可リストなしで受け付ける
 9. Route Handler 内に業務処理を直接書く
 10. `params` を `await` せずに使う
-11. 日付を `new Date(y, m, d)`（ローカルタイム）で構築する
-12. レスポンスにスタックトレース・SQL・例外メッセージ原文を含める
-13. ログへ `rawText` / `aiSnapshot` 全文 / 秘密値を出力する
-14. `any` で型エラーを回避する
-15. 依存パッケージを追加する（必要なら理由を報告する）
-16. 設計書にない仕様を推測で実装する
+11. 日付を `new Date(y, m, d)`（ローカルタイム）で構築する / 実行環境の `TZ` に依存した日時処理を書く
+12. `timestamptz` の日付範囲検索をUTCの1日として解釈する（**JSTの1日**として解釈すること）
+13. レスポンスの日時をUTC表記（末尾 `Z`）で返す
+14. レスポンスにスタックトレース・SQL・例外メッセージ原文を含める
+15. ログへ `rawText` / `aiSnapshot` 全文 / 秘密値を出力する
+16. `any` で型エラーを回避する
+17. 依存パッケージを追加する（必要なら理由を報告する）
+18. 設計書にない仕様を推測で実装する
 
 ---
 
