@@ -26,5 +26,8 @@ Next.js、PostgreSQL、Prisma、Google OAuthで構築します。
 
 ## Phase進捗
 
-- Phase 1: 実装中
-- Phase 2以降: 未着手
+- Phase 1（基盤: Next.js / Prisma / next-auth / Health API / Docker）: **完了**（PR #1）
+- Phase 2（API群: project-intakes / projects / csv-imports / integration-status / users）: 着手可能
+- Phase 3以降: 未着手
+
+実装指示は `docs/09_実装指示/` を参照。着手前に `設計差分_v1.2_実装前確定事項.md` を必ず読むこと。
