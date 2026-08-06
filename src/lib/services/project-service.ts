@@ -58,8 +58,13 @@ const projectSort = {
   "projectCode:desc": { projectCode: "desc" },
 } as const satisfies Record<ProjectQuery["sort"], Prisma.ProjectOrderByWithRelationInput>;
 
-function projectWhere(query: ProjectQuery): Prisma.ProjectWhereInput {
-  const where: Prisma.ProjectWhereInput = {};
+function projectWhere(
+  query: ProjectQuery,
+  options: { excludeArchived?: boolean } = {},
+): Prisma.ProjectWhereInput {
+  const where: Prisma.ProjectWhereInput = options.excludeArchived
+    ? { projectStatus: { not: "ARCHIVED" } }
+    : {};
   if (query.q) where.projectName = { contains: query.q, mode: "insensitive" };
   if (query.projectStatus) where.projectStatus = query.projectStatus;
   if (query.startMonth) where.startMonth = monthToDbDate(query.startMonth);
@@ -69,8 +74,12 @@ function projectWhere(query: ProjectQuery): Prisma.ProjectWhereInput {
   return where;
 }
 
-export async function listProjects(query: ProjectQuery, page: PageInput) {
-  const where = projectWhere(query);
+export async function listProjects(
+  query: ProjectQuery,
+  page: PageInput,
+  options: { excludeArchived?: boolean } = {},
+) {
+  const where = projectWhere(query, options);
   const [rows, total] = await Promise.all([
     prisma.project.findMany({
       where,
