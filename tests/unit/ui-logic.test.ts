@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { displayValue, formatJstDateTime, formatMonth, formatPrice } from "@/lib/format/display";
 import { safeHttpHref, tokenizeRawText } from "@/lib/format/raw-text";
 import { isAiValueChanged } from "@/lib/ui/ai-diff";
+import { toBusinessFormState, toBusinessPayload, type BusinessValues } from "@/lib/ui/business-fields";
 import { csvDisplayKind } from "@/lib/ui/csv-display";
 import { redactCsvRawText } from "@/lib/ui/csv-raw";
 import { capabilitiesForRole } from "@/lib/ui/permissions";
@@ -145,6 +146,37 @@ describe("E. AI初期値との差分判定", () => {
 
   it("nullと空文字を同一視しない", () => {
     expect(isAiValueChanged({ role: null }, "role", "")).toBe(true);
+  });
+
+  it("表示専用メタデータを更新payloadへ混入させない", () => {
+    const values: BusinessValues & { id: string } = {
+      id: "metadata-id",
+      projectName: "案件A",
+      projectSummary: null,
+      requiredSkills: [],
+      preferredSkills: [],
+      role: null,
+      process: null,
+      unitPriceMinMan: null,
+      unitPriceMaxMan: null,
+      settlementRange: null,
+      startMonth: null,
+      endMonth: null,
+      workDaysPerWeek: null,
+      location: null,
+      nearestStation: null,
+      remoteStyle: null,
+      remoteNote: null,
+      recruitmentCount: null,
+      commercialFlow: null,
+      interviewCount: null,
+      foreignerAllowed: null,
+      ageLimit: null,
+      nationalityNote: null,
+      employmentCondition: null,
+    };
+
+    expect(toBusinessPayload(toBusinessFormState(values))).not.toHaveProperty("id");
   });
 });
 

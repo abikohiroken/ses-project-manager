@@ -127,9 +127,10 @@ function nullableNumber(value: string): number | null {
 
 export function toBusinessFormState(value: BusinessValues): BusinessFormState {
   return {
-    ...value,
     projectName: formText(value.projectName),
     projectSummary: formText(value.projectSummary),
+    requiredSkills: value.requiredSkills,
+    preferredSkills: value.preferredSkills,
     role: formText(value.role),
     process: formText(value.process),
     unitPriceMinMan: formNumber(value.unitPriceMinMan),
@@ -154,9 +155,10 @@ export function toBusinessFormState(value: BusinessValues): BusinessFormState {
 
 export function toBusinessPayload(value: BusinessFormState): BusinessValues {
   return {
-    ...value,
     projectName: nullableText(value.projectName),
     projectSummary: nullableText(value.projectSummary),
+    requiredSkills: value.requiredSkills,
+    preferredSkills: value.preferredSkills,
     role: nullableText(value.role),
     process: nullableText(value.process),
     unitPriceMinMan: nullableNumber(value.unitPriceMinMan),
