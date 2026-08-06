@@ -76,7 +76,7 @@
 | UI | Tailwind CSS（`create-next-app`の既定に従う） |
 | ORM | Prisma 7（7.9.x系）+ `@prisma/adapter-pg` |
 | DB | PostgreSQL 16 |
-| 認証 | Auth.js (NextAuth) v5 |
+| 認証 | **next-auth 4.24.15（安定版・正確指定）**。設計差分v1.2 §13 |
 | バリデーション | Zod |
 | テスト | Vitest |
 | Lint / Format | ESLint + Prettier |
@@ -371,14 +371,43 @@ INITIAL_ADMIN_NAME
 
 設計差分v1.2 §6 に従う。
 
+**採用版は next-auth 4.24.15（安定版）。v5 betaは使わない。** 理由と v4/v5 のAPI差分は設計差分v1.2 §13 を必ず読むこと。
+
+`package.json` は `"next-auth": "4.24.15"` と**正確指定**する（caretを付けない）。
+
 #### 4.4.1 設定（`src/auth.ts`）
 
-- Provider: Google のみ
+`NextAuthOptions` をエクスポートする。v5の `export const { auth, handlers } = NextAuth({...})` の形にしない。
+
+```ts
+import type { NextAuthOptions } from "next-auth";
+import GoogleProvider from "next-auth/providers/google";
+
+export const authOptions: NextAuthOptions = { /* ... */ };
+```
+
+- Provider: Google のみ。`clientId` / `clientSecret` に `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` を明示的に渡す
 - `session.strategy = "jwt"`
 - `session.maxAge = 8 * 60 * 60`（8時間）
 - Prisma Adapter は**使わない**
 - `pages.signIn = "/login"`
 - `pages.error = "/login"`
+
+ルートハンドラ `src/app/api/auth/[...nextauth]/route.ts`:
+
+```ts
+import NextAuth from "next-auth";
+import { authOptions } from "@/auth";
+
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };
+```
+
+サーバー側でセッションを取る箇所（`guard.ts` など）は `getServerSession(authOptions)` を使う。
+
+```ts
+import { getServerSession } from "next-auth/next";
+```
 
 #### 4.4.2 signIn callback
 
@@ -522,11 +551,21 @@ Phase 3 までのプレースホルダ。
 - 未認証で保護API → 401 JSON
 - `/login`、`/api/auth/*`、`/api/health`、静的アセットは `config.matcher` で除外
 
-Auth.js の連携例が `export { auth as middleware }` になっている資料が多いが、Next.js 16 では以下とする。
+next-auth v4 には v5 の `auth()` ラッパーがないため、`next-auth/jwt` の `getToken` でJWTを直接検証する。
 
 ```ts
-export { auth as proxy } from "@/auth";
+import { getToken } from "next-auth/jwt";
+import { NextResponse, type NextRequest } from "next/server";
+
+export async function proxy(req: NextRequest) {
+  const token = await getToken({ req, secret: process.env.AUTH_SECRET });
+  // 未認証: ページは /login へリダイレクト、APIは401 JSON
+}
+
+export const config = { matcher: [/* 除外設定 */] };
 ```
+
+`export { auth as middleware }` や `export { auth as proxy }` は **v5 の書き方なので使わない**。
 
 ### 4.10 Dockerfile
 
