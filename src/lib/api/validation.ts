@@ -15,6 +15,18 @@ export function queryRecord(
   );
 }
 
+export function parseQuery<T>(
+  params: URLSearchParams,
+  schema: z.ZodType<T>,
+  omitted: readonly string[] = [],
+): T {
+  const result = schema.safeParse(queryRecord(params, omitted));
+  if (!result.success) {
+    throw new ApiError("INVALID_QUERY", zodErrorDetails(result.error));
+  }
+  return result.data;
+}
+
 export function zodErrorDetails(error: z.ZodError): ErrorDetail[] {
   return error.issues.map((issue) => ({
     ...(issue.path.length > 0 ? { field: issue.path.join(".") } : {}),

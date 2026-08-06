@@ -7,7 +7,7 @@ export const uuidSchema = z.string().uuid();
 export const timestampSchema = z.string().datetime({ offset: true });
 export const monthSchema = z.string().regex(monthPattern, "YYYY-MM形式で指定してください。");
 export const rangeDateTimeSchema = z.string().refine(
-  (value) => datePattern.test(value) || !Number.isNaN(Date.parse(value)),
+  (value) => datePattern.test(value) || timestampSchema.safeParse(value).success,
   "YYYY-MM-DDまたはオフセット付きISO 8601日時を指定してください。",
 );
 
