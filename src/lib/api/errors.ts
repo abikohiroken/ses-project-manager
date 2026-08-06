@@ -40,6 +40,14 @@ export const API_ERROR_DEFINITIONS = {
     status: 409,
     message: "同じ内容のCSVがすでに処理されています。",
   },
+  DUPLICATE_USER_EMAIL: {
+    status: 409,
+    message: "同じメールアドレスのユーザーがすでに登録されています。",
+  },
+  PAYLOAD_TOO_LARGE: {
+    status: 413,
+    message: "リクエスト本文のサイズが上限を超えています。",
+  },
   PROJECT_CODE_EXHAUSTED: {
     status: 409,
     message: "本日の案件コードをこれ以上採番できません。",
@@ -94,6 +102,7 @@ const duplicateCodes = new Set<ApiErrorCode>([
   "DUPLICATE_LINE_MESSAGE_ID",
   "DUPLICATE_DRIVE_FILE",
   "DUPLICATE_FILE_HASH",
+  "DUPLICATE_USER_EMAIL",
 ]);
 
 function isPrismaErrorLike(error: unknown): error is PrismaErrorLike {
@@ -117,6 +126,7 @@ function duplicateCodeFor(error: PrismaErrorLike): ApiErrorCode | undefined {
   if (/line_?message_?id/i.test(target)) return "DUPLICATE_LINE_MESSAGE_ID";
   if (/drive_?file_?id/i.test(target)) return "DUPLICATE_DRIVE_FILE";
   if (/file_?hash/i.test(target)) return "DUPLICATE_FILE_HASH";
+  if (/email/i.test(target)) return "DUPLICATE_USER_EMAIL";
   return undefined;
 }
 
