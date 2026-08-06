@@ -33,3 +33,6 @@ Next.js、PostgreSQL、Prisma、Google OAuthで構築します。
 - Phase 5以降（LINE連携・GAS・テスト/配備）: 未着手
 
 実装指示は `docs/09_実装指示/` を参照。着手前に `設計差分_v1.2_実装前確定事項.md` を必ず読むこと。
+
+Phase 5 の前提となる外部環境（ドメイン・Google Cloud・Drive・スプレッドシート・LINE）の
+整備手順は `docs/10_環境整備/外部環境整備手順書.md` を参照。
