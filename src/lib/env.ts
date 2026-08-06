@@ -25,6 +25,7 @@ export const envSchema = z
     LINE_CHANNEL_SECRET: optionalString,
     LINE_CHANNEL_ACCESS_TOKEN: optionalString,
     CRON_SECRET: optionalString,
+    CSV_SCHEMA_VERSION: optionalString,
     INITIAL_ADMIN_EMAIL: optionalString,
     INITIAL_ADMIN_NAME: optionalString,
   })
