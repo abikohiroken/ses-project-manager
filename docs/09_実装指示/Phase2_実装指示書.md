@@ -217,7 +217,9 @@ fail(code, message, details?)                    // { error: { code, message, de
 - `ApiError(code, details?)`: `.code` / `.status` / `.details` を持つ
 - `mapPrismaError(error, options?)`: P2002 / P2025 / P2034 / P2024 / P2037 を変換
 
-Phase 2 で必要なコードはすべて定義済みである（`PROJECT_CODE_EXHAUSTED` を含む）。**新しいエラーコードを追加しない。** 必要になったら報告すること。
+**新しいエラーコードを勝手に追加しない。** 必要になったら報告すること。
+
+ただし **§12 で2件の追加を承認済み**である（`DUPLICATE_USER_EMAIL` / `PAYLOAD_TOO_LARGE`）。この2件のみ追加してよい。
 
 ### 3.4 `src/lib/prisma.ts`
 
@@ -246,7 +248,7 @@ Route Handler 内に業務処理を直接書かない。ハンドラは「認証
 
 - `ZodError` → `ErrorDetail[]` 変換
 - `Content-Type` が `application/json` でない場合は 400
-- JSON body の上限 1MiB 超過は 413
+- JSON body の上限 1MiB 超過は **`PAYLOAD_TOO_LARGE`（413）**（§12.2）
 
 ### 4.3 `src/lib/api/pagination.ts`
 
@@ -410,7 +412,7 @@ GET /api/csv-imports/{id}
 ```
 
 - 参照専用。作成・更新APIは作らない（取込処理は Phase 4）
-- `rawData` は **ERROR 行の詳細を要求されたときだけ**返す。一覧・通常の詳細では返さない
+- `rawData` は **ERROR 行の詳細を要求されたときだけ**返す。要求方法は §12.3 で確定
 - 原文全文はこのAPIから返さない
 - `duplicateOfImport` を詳細に含める
 - ソート許可: `importedAt:desc`（既定） / `importedAt:asc` / `createdAt:desc` / `createdAt:asc`
@@ -457,8 +459,9 @@ PATCH /api/users/{id}
 ```
 
 - **ADMIN のみ**。他ロールは 403
+- `GET` のレスポンス仕様は §12.4 で確定
 - `email` は trim + lowercase して保存（`users_email_lowercase_ck` 制約）
-- 重複 email は 409 `DUPLICATE_RECEPTION_ID` ではなく、`mapPrismaError` の既定に任せず**明示的に扱う**。適切なコードがない場合は報告すること（新規コードを勝手に追加しない）
+- 重複 email は **`DUPLICATE_USER_EMAIL`（409）**（§12.1）
 - **最後の有効なADMINを無効化・降格できない**。試行時は 409 `INVALID_STATE_TRANSITION`
   - 判定は「対象ユーザー以外に `role=ADMIN` かつ `isActive=true` が1人以上いるか」
   - 自分自身の降格も同じ判定に従う
@@ -694,3 +697,93 @@ G 連携状態            : 〃
 ```
 
 PR本文に §10 の報告内容を含める。**main へ直接pushしない。**
+
+---
+
+## 12. 実装前照会への回答【2026-08-06 確定】
+
+実装着手前の照会4件に対する確定判断。本節が該当箇所の正本である。
+
+### 12.1 users の重複 email — `DUPLICATE_USER_EMAIL` を新設（承認）
+
+API詳細設計 §10.2 は「重複時409」とのみ記載し、エラーコードが未定義だった。既存の `DUPLICATE_*` は意味が一致しないため流用しない。
+
+`errors.ts` へ追加する。
+
+```ts
+DUPLICATE_USER_EMAIL: {
+  status: 409,
+  message: "同じメールアドレスのユーザーがすでに登録されています。",
+},
+```
+
+あわせて `mapPrismaError` を更新する。
+
+- `duplicateCodes` Set へ `DUPLICATE_USER_EMAIL` を追加する
+- `duplicateCodeFor` に `/email/i` → `DUPLICATE_USER_EMAIL` の判定を追加する
+
+`users.email` 以外に email を含む一意制約は存在しないため、この判定で誤検出は起きない。
+
+### 12.2 JSON body 1MiB超過 — `PAYLOAD_TOO_LARGE` を新設（承認）
+
+`VALIDATION_ERROR` のステータス上書きは**採用しない**。`ApiError` はコードからステータスを導出する設計であり、上書きすると「コードとHTTPステータスが1対1」という不変条件が壊れ、以後のコード追加時に判断が揺れる。
+
+API詳細設計 §2.4 は 413 を正式なステータスとして既に列挙している。欠けていたのはコード名だけである。
+
+```ts
+PAYLOAD_TOO_LARGE: {
+  status: 413,
+  message: "リクエスト本文のサイズが上限を超えています。",
+},
+```
+
+### 12.3 csv-imports の rawData 取得 — `?rawDataRowId=<uuid>` を採用
+
+```text
+GET /api/csv-imports/{id}?rawDataRowId=<csv_import_rows.id>
+```
+
+指定された**1行だけ** `rawData` を返す。`includeRawData=true`（全ERROR行）は採用しない。
+
+理由:
+
+- `rawData` には `raw_text`（最大50,000文字）が含まれる。1ファイル最大1,000行のため、全ERROR行を返すと最悪 50MB 規模のレスポンスになる
+- 画面詳細設計 §7.4 は「ERROR行を開いた場合のみ `rawData` を表示する」であり、1行ずつ取得する方が画面の挙動と一致する
+- LINE原文の一括抽出経路を作らないという方針（設計差分v1.2 §6 の情報最小化）とも整合する
+
+動作:
+
+| 条件 | 応答 |
+|---|---|
+| `rawDataRowId` 未指定 | `rawData` を一切含めない通常の詳細 |
+| 指定行が当該 `csv_import` に属さない / 存在しない | 404 `NOT_FOUND` |
+| 指定行の `status` が `ERROR` 以外 | 400 `VALIDATION_ERROR`（reason: ERROR行のみ取得できる旨） |
+| 指定行が `ERROR` | その行にのみ `rawData` を含めて返す |
+
+`rawData` はログへ出力しない（§6.3）。
+
+### 12.4 `GET /api/users` のレスポンス仕様
+
+**ページングを付ける。** 他の一覧APIと同じ `okList` 封筒に揃え、Phase 3 で一覧処理を共通化できるようにする。利用者は5〜20名想定（基本設計 §20.1）のため実際のページ送りは発生しないが、封筒の形を揃えることを優先する。
+
+| 項目 | 確定 |
+|---|---|
+| 封筒 | `okList(data, pagination)` |
+| `page` / `pageSize` | §4.3 の共通仕様（既定50 / 最大100） |
+| 既定ソート | `email:asc` |
+| ソート許可リスト | `email:asc` / `email:desc` / `name:asc` / `name:desc` / `createdAt:desc` / `createdAt:asc` / `lastLoginAt:desc` |
+| 絞り込み | `isActive`（任意）。未指定なら有効・無効の両方を返す |
+| 返却項目 | `id` / `email` / `name` / `role` / `isActive` / `lastLoginAt` / `createdAt` / `updatedAt` |
+
+無効ユーザーも既定で返す。画面詳細設計 §8.2 に「有効」列があり、再有効化の操作が必要なため。
+
+`q` などの検索条件は画面詳細設計 §8 に定義がないため**追加しない**。
+
+### 12.5 テスト要件への追加
+
+§7 の各セクションへ以下を加える。
+
+- **A**: `PAYLOAD_TOO_LARGE` が 413 で返る（1MiB超過）
+- **F**: 重複 email での作成が `DUPLICATE_USER_EMAIL`(409) になる
+- **F**: `GET /api/users` が `okList` 封筒・`email:asc`・無効ユーザーを含むことを返す
+- **G**: `rawDataRowId` の4条件（未指定 / 他importの行 / 非ERROR行 / ERROR行）
