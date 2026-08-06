@@ -4,6 +4,23 @@ import GoogleProvider from "next-auth/providers/google";
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 
+export async function authorizeUser(
+  profileEmail: string | null | undefined,
+): Promise<boolean | string> {
+  if (!profileEmail) return false;
+
+  const email = profileEmail.trim().toLowerCase();
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) return "/login?error=NOT_REGISTERED";
+  if (!user.isActive) return "/login?error=INACTIVE";
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { lastLoginAt: new Date() },
+  });
+  return true;
+}
+
 export const authOptions: NextAuthOptions = {
   secret: env.AUTH_SECRET,
   providers: [
@@ -22,18 +39,7 @@ export const authOptions: NextAuthOptions = {
   },
   callbacks: {
     async signIn({ profile }) {
-      if (!profile?.email) return false;
-
-      const email = profile.email.trim().toLowerCase();
-      const user = await prisma.user.findUnique({ where: { email } });
-      if (!user) return "/login?error=NOT_REGISTERED";
-      if (!user.isActive) return "/login?error=INACTIVE";
-
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { lastLoginAt: new Date() },
-      });
-      return true;
+      return authorizeUser(profile?.email);
     },
     async jwt({ token, account, profile }) {
       if (account && profile?.email) {
