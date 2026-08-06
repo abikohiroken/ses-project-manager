@@ -12,6 +12,7 @@ export default defineConfig({
       AUTH_GOOGLE_SECRET: "test-google-secret",
       APP_URL: "http://localhost:3000",
       NEXTAUTH_URL: "http://localhost:3000",
+      CRON_SECRET: "test-cron-secret",
     },
   },
   resolve: {
