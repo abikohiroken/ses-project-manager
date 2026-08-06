@@ -4,6 +4,7 @@ import { displayValue, formatJstDateTime, formatMonth, formatPrice } from "@/lib
 import { safeHttpHref, tokenizeRawText } from "@/lib/format/raw-text";
 import { isAiValueChanged } from "@/lib/ui/ai-diff";
 import { csvDisplayKind } from "@/lib/ui/csv-display";
+import { redactCsvRawText } from "@/lib/ui/csv-raw";
 import { capabilitiesForRole } from "@/lib/ui/permissions";
 import { projectActionsForStatus } from "@/lib/ui/project-actions";
 
@@ -162,5 +163,12 @@ describe("F. CSV履歴の表示判定", () => {
 
   it("MOVE_PENDINGを警告表示にする", () => {
     expect(csvDisplayKind("SUCCESS", null, "MOVE_PENDING")).toBe("warning");
+  });
+
+  it("rawDataからLINE原文だけを伏せる", () => {
+    expect(redactCsvRawText({ project_name: "案件A", raw_text: "秘密の原文" })).toEqual({
+      project_name: "案件A",
+      raw_text: "（原文はこの画面では表示しません）",
+    });
   });
 });
