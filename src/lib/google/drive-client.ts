@@ -1,11 +1,10 @@
 import { drive, type drive_v3 } from "@googleapis/drive";
-import { JWT } from "google-auth-library";
 
 import type { AppEnv } from "@/lib/env";
 import { env } from "@/lib/env";
+import { createGoogleJwt, withGoogleApiRetry } from "@/lib/google/google-api";
 
-const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
-const MAX_RETRIES = 3;
+export { restorePrivateKey, withGoogleApiRetry } from "@/lib/google/google-api";
 
 export type DriveFile = {
   id: string;
@@ -23,54 +22,6 @@ export interface DriveClient {
   listFiles(): Promise<DriveFile[]>;
   downloadFile(fileId: string): Promise<Uint8Array>;
   moveFile(fileId: string, destination: MoveDestination): Promise<void>;
-}
-
-type RetryOptions = {
-  sleep?: (milliseconds: number) => Promise<void>;
-  random?: () => number;
-};
-
-export function restorePrivateKey(value: string): string {
-  return value.replace(/\\n/g, "\n");
-}
-
-function googleStatus(error: unknown): number | null {
-  if (typeof error !== "object" || error === null) return null;
-  const candidate = error as {
-    code?: unknown;
-    response?: { status?: unknown };
-  };
-  if (typeof candidate.response?.status === "number") return candidate.response.status;
-  return typeof candidate.code === "number" ? candidate.code : null;
-}
-
-function isRetryableGoogleStatus(status: number | null): boolean {
-  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
-}
-
-const defaultSleep = (milliseconds: number) =>
-  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
-
-export async function withGoogleApiRetry<T>(
-  operation: () => Promise<T>,
-  options: RetryOptions = {},
-): Promise<T> {
-  const sleep = options.sleep ?? defaultSleep;
-  const random = options.random ?? Math.random;
-  let retry = 0;
-  while (true) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (!isRetryableGoogleStatus(googleStatus(error)) || retry >= MAX_RETRIES) {
-        throw error;
-      }
-      const baseDelay = 1_000 * 2 ** retry;
-      const jitter = Math.floor(random() * 250);
-      retry += 1;
-      await sleep(baseDelay + jitter);
-    }
-  }
 }
 
 type DriveConfiguration = {
@@ -96,11 +47,10 @@ function requireDriveConfiguration(input: AppEnv): DriveConfiguration {
 }
 
 function createApi(configuration: DriveConfiguration): drive_v3.Drive {
-  const auth = new JWT({
-    email: configuration.clientEmail,
-    key: restorePrivateKey(configuration.privateKey),
-    scopes: [DRIVE_SCOPE],
-  });
+  const auth = createGoogleJwt(
+    configuration.clientEmail,
+    configuration.privateKey,
+  );
   // @googleapis/drive@21 bundles google-auth-library v10 types while the
   // approved direct dependency is v11. The runtime AuthClient contract is
   // compatible, so bridge only that duplicated-package type boundary.
@@ -128,14 +78,18 @@ export function createDriveClient(input: AppEnv = env): DriveClient {
       const response = await withGoogleApiRetry(() =>
         api.files.list({
           q: `'${configuration.inboxFolderId}' in parents and trashed = false`,
-          fields: "files(id,name,mimeType,size,createdTime,modifiedTime,parents)",
+          fields:
+            "files(id,name,mimeType,size,createdTime,modifiedTime,parents)",
           orderBy: "createdTime asc,name asc",
           pageSize: 10,
         }),
       );
       return (response.data.files ?? []).flatMap((file) => {
         if (!file.id || !file.name) return [];
-        const size = file.size === null || file.size === undefined ? null : Number(file.size);
+        const size =
+          file.size === null || file.size === undefined
+            ? null
+            : Number(file.size);
         return [
           {
             id: file.id,
@@ -180,5 +134,6 @@ export function createDriveClient(input: AppEnv = env): DriveClient {
 export const googleDriveClient: DriveClient = {
   listFiles: () => createDriveClient().listFiles(),
   downloadFile: (fileId) => createDriveClient().downloadFile(fileId),
-  moveFile: (fileId, destination) => createDriveClient().moveFile(fileId, destination),
+  moveFile: (fileId, destination) =>
+    createDriveClient().moveFile(fileId, destination),
 };

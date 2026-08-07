@@ -25,6 +25,6 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
 
 export const config = {
   matcher: [
-    "/((?!login|api/auth|api/health|_next/static|_next/image|favicon.ico|.*\\..*).*)",
+    "/((?!login|api/auth|api/health|api/webhooks/line|api/internal|_next/static|_next/image|favicon.ico|.*\\..*).*)",
   ],
 };
