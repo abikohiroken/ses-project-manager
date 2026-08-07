@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@googleapis/drive": "21.0.0",
+    "@googleapis/sheets": "14.0.0",
     "@prisma/adapter-pg": "~7.9.0",
     "@prisma/client": "~7.9.0",
     "csv-parse": "7.0.2",
